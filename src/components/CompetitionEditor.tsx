@@ -56,11 +56,8 @@ interface CompetitionEditorProps {
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
   description: z.string().optional(),
-  imageUrl: z
-    .string()
-    .url("Must be a valid URL")
-    .min(1, "Image URL is required"),
-  competitionUrl: z.string().url("Must be a valid URL").optional(),
+  imageUrl: z.string().min(1, "Image URL is required"),
+  competitionUrl: z.string().optional(),
   category: z.string().min(1, "Category is required"),
   difficulty: z.enum(["Easy", "Medium", "Hard", "Expert"]),
   prizeValue: z.string().min(1, "Prize value is required"),

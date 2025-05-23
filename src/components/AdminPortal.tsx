@@ -113,19 +113,30 @@ const AdminPortal: React.FC = () => {
       // Transform the data to match Supabase schema
       const competitionData = {
         title: data.title,
-        description: data.description,
+        description: data.description || null,
         image_url: data.imageUrl,
-        competition_url: data.competitionUrl,
+        competition_url: data.competitionUrl || null,
         category: data.category,
         difficulty: data.difficulty,
         prize_value: data.prizeValue,
         requirements: data.requirements,
         rules: data.rules,
-        start_date: data.startDate,
-        end_date: data.endDate,
+        start_date: data.startDate || null,
+        end_date: data.endDate || null,
+        deadline: data.endDate || null, // Using endDate for deadline as well
+        entry_difficulty: data.difficulty, // Using the same difficulty for entry_difficulty
+        entry_url: data.competitionUrl || null,
         status: data.status,
         updated_at: new Date().toISOString(),
       };
+
+      // Get current user if authenticated
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        competitionData.created_by = user.id;
+      }
 
       let result;
 
@@ -146,7 +157,40 @@ const AdminPortal: React.FC = () => {
           .select();
       }
 
+      console.log("Supabase result:", result);
+
       if (result.error) throw result.error;
+
+      // If this is a new competition and we have requirements in the form data,
+      // add them to the competition_requirements table
+      if (!selectedCompetitionId && result.data && result.data[0]) {
+        const competitionId = result.data[0].id;
+
+        // Add eligibility criteria if available
+        if (data.requirements) {
+          const eligibilityCriteria = data.requirements
+            .split("\n")
+            .filter((line) => line.trim());
+          if (eligibilityCriteria.length > 0) {
+            await supabase.from("competition_eligibility").insert(
+              eligibilityCriteria.map((criteria) => ({
+                competition_id: competitionId,
+                criteria: criteria.trim(),
+              })),
+            );
+          }
+        }
+
+        // Add requirements from rules
+        if (data.rules && data.rules.length > 0) {
+          await supabase.from("competition_requirements").insert(
+            data.rules.map((rule) => ({
+              competition_id: competitionId,
+              requirement: rule,
+            })),
+          );
+        }
+      }
 
       // Refresh the competitions list
       const { data: refreshedData, error: refreshError } = await supabase

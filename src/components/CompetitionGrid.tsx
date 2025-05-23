@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import CompetitionCard from "./CompetitionCard";
+import { supabase } from "@/lib/supabase";
 
 interface Competition {
   id: string;
@@ -24,67 +25,205 @@ interface CompetitionGridProps {
   };
 }
 
+// Fallback competitions data in case the API fails
+const fallbackCompetitions: Competition[] = [
+  {
+    id: "1",
+    title: "Summer Photography Contest",
+    imageUrl:
+      "https://images.unsplash.com/photo-1500835556837-99ac94a94552?w=800&q=80",
+    deadline: "2023-08-15",
+    prizeValue: "$5,000",
+    category: "Photography",
+    difficulty: "Easy",
+    requirements:
+      "Submit up to 3 original summer-themed photographs. Photos must be high resolution (min 3000px width) and taken within the last 12 months.",
+    description:
+      "Capture the essence of summer in this photography contest with cash prizes and featured exhibition opportunities.",
+  },
+  {
+    id: "2",
+    title: "Tech Innovation Challenge",
+    imageUrl:
+      "https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=80",
+    deadline: "2023-09-30",
+    prizeValue: "$25,000",
+    category: "Technology",
+    difficulty: "Hard",
+    requirements:
+      "Submit a working prototype and business plan for an innovative tech solution addressing environmental challenges. Teams of 1-4 people allowed.",
+    description:
+      "Showcase your innovative tech solutions and win funding to bring your ideas to life.",
+  },
+];
+
 const CompetitionGrid: React.FC<CompetitionGridProps> = ({
-  competitions = defaultCompetitions,
+  competitions = fallbackCompetitions,
   filters = {},
 }) => {
   const [filteredCompetitions, setFilteredCompetitions] =
     useState<Competition[]>(competitions);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Fetch competitions from Supabase
+  useEffect(() => {
+    const fetchCompetitions = async () => {
+      setIsLoading(true);
+
+      try {
+        const { data, error } = await supabase
+          .from("competitions")
+          .select("*")
+          .eq("status", "active");
+
+        if (error) throw error;
+
+        // Transform the data to match our Competition interface
+        const transformedData: Competition[] = data.map((item) => ({
+          id: item.id,
+          title: item.title,
+          imageUrl: item.image_url,
+          deadline: item.deadline || item.end_date || "",
+          prizeValue: item.prize_value.toString(),
+          category: item.category,
+          difficulty: item.entry_difficulty || item.difficulty,
+          requirements: item.requirements,
+          description: item.description || "",
+        }));
+
+        setFilteredCompetitions(transformedData);
+      } catch (err) {
+        console.error("Error fetching competitions:", err);
+        // Fall back to default competitions if there's an error
+        setFilteredCompetitions(fallbackCompetitions);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchCompetitions();
+  }, []);
+
   // Apply filters when they change
   useEffect(() => {
     setIsLoading(true);
 
-    // Simulate loading delay
-    const timer = setTimeout(() => {
-      const filtered = competitions.filter((comp) => {
-        // Filter by category
-        if (
-          filters.category &&
-          filters.category !== "All" &&
-          comp.category !== filters.category
-        ) {
-          return false;
+    // Apply filters to the competitions
+    const applyFilters = async () => {
+      try {
+        // Start building the query
+        let query = supabase
+          .from("competitions")
+          .select("*")
+          .eq("status", "active");
+
+        // Apply category filter
+        if (filters.category && filters.category !== "All") {
+          query = query.eq("category", filters.category);
         }
 
-        // Filter by difficulty
-        if (
-          filters.difficulty &&
-          filters.difficulty !== "All" &&
-          comp.difficulty !== filters.difficulty
-        ) {
-          return false;
+        // Apply difficulty filter
+        if (filters.difficulty && filters.difficulty !== "All") {
+          query = query.eq("difficulty", filters.difficulty);
         }
 
-        // Filter by prize range
+        // Apply end date filter
+        if (filters.endDate) {
+          const formattedDate = filters.endDate.toISOString();
+          query = query.lte("end_date", formattedDate);
+        }
+
+        // Execute the query
+        const { data, error } = await query;
+
+        if (error) throw error;
+
+        // Transform and filter by prize range client-side
+        let transformedData: Competition[] = data.map((item) => ({
+          id: item.id,
+          title: item.title,
+          imageUrl: item.image_url,
+          deadline: item.deadline || item.end_date || "",
+          prizeValue: item.prize_value.toString(),
+          category: item.category,
+          difficulty: item.entry_difficulty || item.difficulty,
+          requirements: item.requirements,
+          description: item.description || "",
+        }));
+
+        // Apply prize range filter client-side
         if (filters.prizeRange) {
-          const prizeNumber = parseInt(comp.prizeValue.replace(/[^0-9]/g, ""));
+          transformedData = transformedData.filter((comp) => {
+            const prizeNumber = parseInt(
+              comp.prizeValue.replace(/[^0-9]/g, ""),
+            );
+            return (
+              prizeNumber >= filters.prizeRange[0] &&
+              prizeNumber <= filters.prizeRange[1]
+            );
+          });
+        }
+
+        setFilteredCompetitions(transformedData);
+      } catch (err) {
+        console.error("Error applying filters:", err);
+        // Fall back to client-side filtering
+        const filtered = competitions.filter((comp) => {
+          // Filter by category
           if (
-            prizeNumber < filters.prizeRange[0] ||
-            prizeNumber > filters.prizeRange[1]
+            filters.category &&
+            filters.category !== "All" &&
+            comp.category !== filters.category
           ) {
             return false;
           }
-        }
 
-        // Filter by end date
-        if (filters.endDate) {
-          const deadlineDate = new Date(comp.deadline);
-          if (deadlineDate > filters.endDate) {
+          // Filter by difficulty
+          if (
+            filters.difficulty &&
+            filters.difficulty !== "All" &&
+            comp.difficulty !== filters.difficulty
+          ) {
             return false;
           }
-        }
 
-        return true;
-      });
+          // Filter by prize range
+          if (filters.prizeRange) {
+            const prizeNumber = parseInt(
+              comp.prizeValue.replace(/[^0-9]/g, ""),
+            );
+            if (
+              prizeNumber < filters.prizeRange[0] ||
+              prizeNumber > filters.prizeRange[1]
+            ) {
+              return false;
+            }
+          }
 
-      setFilteredCompetitions(filtered);
-      setIsLoading(false);
-    }, 500);
+          // Filter by end date
+          if (filters.endDate) {
+            const deadlineDate = new Date(comp.deadline);
+            if (deadlineDate > filters.endDate) {
+              return false;
+            }
+          }
+
+          return true;
+        });
+
+        setFilteredCompetitions(filtered);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    // Add a small delay to prevent too many requests when filters change rapidly
+    const timer = setTimeout(() => {
+      applyFilters();
+    }, 300);
 
     return () => clearTimeout(timer);
-  }, [competitions, filters]);
+  }, [filters]);
 
   // Animation variants for grid items
   const containerVariants = {
@@ -152,121 +291,5 @@ const CompetitionGrid: React.FC<CompetitionGridProps> = ({
     </div>
   );
 };
-
-// Default competitions data for development and testing
-const defaultCompetitions: Competition[] = [
-  {
-    id: "1",
-    title: "Summer Photography Contest",
-    imageUrl:
-      "https://images.unsplash.com/photo-1500835556837-99ac94a94552?w=800&q=80",
-    deadline: "2023-08-15",
-    prizeValue: "$5,000",
-    category: "Photography",
-    difficulty: "Easy",
-    requirements:
-      "Submit up to 3 original summer-themed photographs. Photos must be high resolution (min 3000px width) and taken within the last 12 months.",
-    description:
-      "Capture the essence of summer in this photography contest with cash prizes and featured exhibition opportunities.",
-  },
-  {
-    id: "2",
-    title: "Tech Innovation Challenge",
-    imageUrl:
-      "https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=80",
-    deadline: "2023-09-30",
-    prizeValue: "$25,000",
-    category: "Technology",
-    difficulty: "Hard",
-    requirements:
-      "Submit a working prototype and business plan for an innovative tech solution addressing environmental challenges. Teams of 1-4 people allowed.",
-    description:
-      "Showcase your innovative tech solutions and win funding to bring your ideas to life.",
-  },
-  {
-    id: "3",
-    title: "Culinary Creations Sweepstakes",
-    imageUrl:
-      "https://images.unsplash.com/photo-1556911220-bff31c812dba?w=800&q=80",
-    deadline: "2023-07-31",
-    prizeValue: "$2,500",
-    category: "Food",
-    difficulty: "Medium",
-    requirements:
-      "Submit an original recipe with photos of the finished dish. Recipe must include the sponsor's product as a key ingredient.",
-    description:
-      "Create delicious recipes using our sponsor products and win kitchen appliances and cash prizes.",
-  },
-  {
-    id: "4",
-    title: "Fitness Transformation Challenge",
-    imageUrl:
-      "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=800&q=80",
-    deadline: "2023-10-15",
-    prizeValue: "$10,000",
-    category: "Fitness",
-    difficulty: "Hard",
-    requirements:
-      "Document your 12-week fitness journey with weekly updates, before/after photos, and a detailed training and nutrition log.",
-    description:
-      "Transform your body and life in our 12-week challenge with expert coaching and substantial prizes.",
-  },
-  {
-    id: "5",
-    title: "Short Story Competition",
-    imageUrl:
-      "https://images.unsplash.com/photo-1457369804613-52c61a468e7d?w=800&q=80",
-    deadline: "2023-08-31",
-    prizeValue: "$3,000",
-    category: "Writing",
-    difficulty: "Medium",
-    requirements:
-      'Submit an original short story between 2,000-5,000 words on the theme "Beginnings". Stories must be previously unpublished.',
-    description:
-      "Share your creative writing talents in our annual short story competition with publication opportunities.",
-  },
-  {
-    id: "6",
-    title: "Sustainable Design Awards",
-    imageUrl:
-      "https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=800&q=80",
-    deadline: "2023-11-30",
-    prizeValue: "$15,000",
-    category: "Design",
-    difficulty: "Medium",
-    requirements:
-      "Submit designs for sustainable home products that reduce environmental impact. Include material specifications, production methods, and impact analysis.",
-    description:
-      "Design innovative sustainable products that could change how we live and reduce our environmental footprint.",
-  },
-  {
-    id: "7",
-    title: "Mobile App Development Contest",
-    imageUrl:
-      "https://images.unsplash.com/photo-1551650975-87deedd944c3?w=800&q=80",
-    deadline: "2023-09-15",
-    prizeValue: "$20,000",
-    category: "Technology",
-    difficulty: "Hard",
-    requirements:
-      "Develop and submit a working mobile app that addresses a social or environmental challenge. App must be original and not previously published.",
-    description:
-      "Create innovative mobile applications that solve real-world problems and compete for development funding.",
-  },
-  {
-    id: "8",
-    title: "Travel Photography Contest",
-    imageUrl:
-      "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=800&q=80",
-    deadline: "2023-08-01",
-    prizeValue: "$4,000",
-    category: "Photography",
-    difficulty: "Easy",
-    requirements:
-      "Submit up to 5 travel photographs that tell a story about a place or culture. Include location details and a brief description for each photo.",
-    description:
-      "Share your travel experiences through photography and win prizes including camera equipment and travel vouchers.",
-  },
-];
 
 export default CompetitionGrid;

@@ -19,6 +19,7 @@ interface FilterState {
 
 const Home = () => {
   const [showFilters, setShowFilters] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [filters, setFilters] = useState<FilterState>({
     categories: [],
     prizeRange: [0, 100000],
