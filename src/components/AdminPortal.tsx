@@ -2,11 +2,15 @@ import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import AdminSidenav from "./AdminSidenav";
 import CompetitionEditor from "./CompetitionEditor";
+import AdminLogin from "./AdminLogin";
 import { Competition, CompetitionFormData } from "@/types/competition";
-import { Loader2 } from "lucide-react";
+import { Loader2, LogOut } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 
 const AdminPortal: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [filteredCompetitions, setFilteredCompetitions] = useState<
     Competition[]
@@ -23,7 +27,56 @@ const AdminPortal: React.FC = () => {
   );
 
   // Fetch competitions from Supabase
+  // Check if user is authenticated
   useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (session) {
+          // Verify if user is an admin
+          const { data: adminData, error: adminError } = await supabase
+            .from("admin_users")
+            .select("*")
+            .eq("user_id", session.user.id)
+            .single();
+
+          if (!adminError && adminData) {
+            setIsAuthenticated(true);
+          } else {
+            // Not an admin, sign out
+            await supabase.auth.signOut();
+            setIsAuthenticated(false);
+          }
+        } else {
+          setIsAuthenticated(false);
+        }
+      } catch (err) {
+        console.error("Auth check error:", err);
+        setIsAuthenticated(false);
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setIsAuthenticated(false);
+  };
+
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+  };
+
+  useEffect(() => {
+    // Only fetch competitions if authenticated
+    if (!isAuthenticated) return;
+
     const fetchCompetitions = async () => {
       setIsLoading(true);
       setError(null);
@@ -248,6 +301,19 @@ const AdminPortal: React.FC = () => {
     (comp) => comp.id === selectedCompetitionId,
   );
 
+  if (isCheckingAuth) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-100">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <span className="ml-2">Checking authentication...</span>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <AdminLogin onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className="flex h-screen bg-gray-100">
       <AdminSidenav
@@ -264,6 +330,17 @@ const AdminPortal: React.FC = () => {
       />
 
       <div className="flex-1 overflow-hidden">
+        <div className="p-4 flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleLogout}
+            className="flex items-center gap-1"
+          >
+            <LogOut className="h-4 w-4" />
+            Logout
+          </Button>
+        </div>
         {isLoading ? (
           <div className="h-full flex items-center justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
