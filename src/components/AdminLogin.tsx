@@ -31,23 +31,77 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
         password,
       });
 
-      if (error) throw error;
-
-      // Check if user has admin role
-      const { data: userData, error: userError } = await supabase
-        .from("admin_users")
-        .select("*")
-        .eq("user_id", data.user.id)
-        .single();
-
-      if (userError || !userData) {
-        await supabase.auth.signOut();
-        throw new Error(
-          "Unauthorized access. You must be an admin to access this page.",
-        );
+      if (error) {
+        if (error.message.includes("Email not confirmed")) {
+          throw new Error(
+            "Please check your email and click the verification link before logging in.",
+          );
+        }
+        throw error;
       }
 
-      onLoginSuccess();
+      if (!data.user) {
+        throw new Error("Authentication failed");
+      }
+
+      // Check if user has admin role in metadata or admin_users table
+      const userRole = data.user.user_metadata?.role;
+
+      if (userRole === "admin") {
+        // For new users with admin role in metadata, create admin_users record if it doesn't exist
+        const { data: existingAdmin } = await supabase
+          .from("admin_users")
+          .select("*")
+          .eq("user_id", data.user.id)
+          .single();
+
+        if (!existingAdmin) {
+          // Create admin user record and users record
+          const { error: userInsertError } = await supabase
+            .from("users")
+            .upsert({
+              id: data.user.id,
+              email: data.user.email,
+            });
+
+          if (userInsertError) {
+            console.warn("User record creation warning:", userInsertError);
+          }
+
+          const { error: adminInsertError } = await supabase
+            .from("admin_users")
+            .insert({
+              user_id: data.user.id,
+              is_super_admin: false,
+            });
+
+          if (adminInsertError) {
+            console.error("Error creating admin record:", adminInsertError);
+            await supabase.auth.signOut();
+            throw new Error(
+              "Failed to initialize admin account. Please contact support.",
+            );
+          }
+        }
+
+        onLoginSuccess();
+      } else {
+        // Check if user exists in admin_users table (for existing admins)
+        const { data: userData, error: userError } = await supabase
+          .from("admin_users")
+          .select("*")
+          .eq("user_id", data.user.id)
+          .single();
+
+        if (userError || !userData) {
+          await supabase.auth.signOut();
+          throw new Error(
+            "Access denied. This portal is for administrators only. Please use the main application for regular user access.",
+          );
+        }
+
+        onLoginSuccess();
+      }
     } catch (err) {
       console.error("Login error:", err);
       setError(
@@ -79,45 +133,52 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
     }
 
     try {
-      // Sign up the user
+      // First create the user in auth
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            role: "admin",
+          },
+        },
       });
 
       if (error) throw error;
 
       if (data.user) {
-        // Create user record in public.users table
-        const { error: userError } = await supabase.from("users").insert({
-          id: data.user.id,
-          email: data.user.email,
-        });
+        // Manually create the user and admin records
+        try {
+          // Create user record
+          await supabase.from("users").insert({
+            id: data.user.id,
+            email: data.user.email,
+          });
 
-        if (userError) {
-          console.error("Error creating user record:", userError);
-        }
-
-        // Create admin user record
-        const { error: adminError } = await supabase
-          .from("admin_users")
-          .insert({
+          // Create admin record
+          await supabase.from("admin_users").insert({
             user_id: data.user.id,
             is_super_admin: false,
           });
 
-        if (adminError) {
-          console.error("Error creating admin record:", adminError);
-          throw new Error("Failed to create admin account");
+          setSuccess(
+            "Admin account created successfully! Please check your email to verify your account before logging in.",
+          );
+          setEmail("");
+          setPassword("");
+          setConfirmPassword("");
+          setIsSignUp(false);
+        } catch (insertError) {
+          console.error("Error creating user records:", insertError);
+          // Continue showing success since auth user was created
+          setSuccess(
+            "Account created but there was an issue setting up admin privileges. Please contact support after verifying your email.",
+          );
+          setEmail("");
+          setPassword("");
+          setConfirmPassword("");
+          setIsSignUp(false);
         }
-
-        setSuccess(
-          "Account created successfully! Please check your email to verify your account.",
-        );
-        setEmail("");
-        setPassword("");
-        setConfirmPassword("");
-        setIsSignUp(false);
       }
     } catch (err) {
       console.error("Sign up error:", err);
