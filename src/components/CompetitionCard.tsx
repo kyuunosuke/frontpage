@@ -53,9 +53,40 @@ const CompetitionCard = ({
   const [saved, setSaved] = useState(isSaved);
   const [isOpen, setIsOpen] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaved(!saved);
     onSave(id);
+
+    // If we have Supabase integration, save to database
+    try {
+      const { supabase } = await import("@/lib/supabase");
+
+      // Check if user is authenticated
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        if (!saved) {
+          // Save competition
+          await supabase.from("saved_competitions").insert({
+            user_id: user.id,
+            competition_id: id,
+          });
+        } else {
+          // Unsave competition
+          await supabase
+            .from("saved_competitions")
+            .delete()
+            .match({ user_id: user.id, competition_id: id });
+        }
+      } else {
+        console.log("User not authenticated, cannot save competition");
+        // Could show a login prompt here
+      }
+    } catch (error) {
+      console.error("Error saving competition:", error);
+    }
   };
 
   const handleEnter = () => {
